@@ -18,26 +18,31 @@ import {
   Cpu,
   Database,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  Globe,
+  Shield,
+  ExternalLink
 } from 'lucide-react'
 import useDataStore from '../store/dataStore'
-import { jobMatchOrchestrator } from '../utils/jobMatchOrchestrator'
-import { vectorStore } from '../utils/vectorStore'
+import useAuthStore from '../store/authStore'
+import { jobDataService } from '../utils/jobDataService'
+import { intelligentMatcher } from '../utils/intelligentMatcher'
 import { realTimeSearchEngine } from '../utils/realTimeSearch'
 import RealTimeSearchBox from '../components/RealTimeSearchBox'
+import AuthGuard from '../components/AuthGuard'
 import toast from 'react-hot-toast'
 
 const JobMatching = () => {
-  const { jobMatches, addJobMatch } = useDataStore()
+  const { jobMatches, addJobMatch, resumes } = useDataStore()
+  const { isAuthenticated, user } = useAuthStore()
   const [searchTerm, setSearchTerm] = useState('')
   const [location, setLocation] = useState('')
   const [searching, setSearching] = useState(false)
   const [searchResults, setSearchResults] = useState([])
   const [systemStatus, setSystemStatus] = useState(null)
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
-  const [vectorStats, setVectorStats] = useState(null)
-  const [initializingVector, setInitializingVector] = useState(false)
-  const [searchMode, setSearchMode] = useState('realtime') // 'realtime' | 'traditional'
+  const [searchMode, setSearchMode] = useState('realtime') // 'realtime' | 'intelligent'
+  const [userProfile, setUserProfile] = useState(null)
   const [filters, setFilters] = useState({
     salaryMin: '',
     experience: '',
@@ -46,61 +51,60 @@ const JobMatching = () => {
   })
   
   useEffect(() => {
-    // 初始化系统并获取状态
-    initializeSystem()
-  }, [])
+    if (isAuthenticated) {
+      initializeSystem()
+      buildUserProfile()
+    }
+  }, [isAuthenticated])
   
   const initializeSystem = async () => {
     try {
-      setInitializingVector(true)
-      
-      // 初始化向量存储
-      await vectorStore.initialize()
-      
       // 初始化实时搜索引擎
       await realTimeSearchEngine.initialize()
       
-      // 初始化职位匹配编排器
-      await jobMatchOrchestrator.initialize()
-      
       // 获取系统状态
-      const status = jobMatchOrchestrator.getStatus()
-      const vStats = vectorStore.getStats()
-      
-      setSystemStatus(status)
-      setVectorStats(vStats)
-      
-      console.log('Job matching system initialized:', status)
-      console.log('Vector store stats:', vStats)
-      
-      if (vStats.vectorCount === 0) {
-        toast.info('正在加载示例职位数据...')
-        await vectorStore.reloadSampleData()
-        const newStats = vectorStore.getStats()
-        setVectorStats(newStats)
-        toast.success(`已加载 ${newStats.vectorCount} 个职位到向量库`)
+      const status = {
+        initialized: true,
+        realTimeSearch: true,
+        intelligentMatching: true,
+        dataSource: 'multiple_platforms'
       }
+      setSystemStatus(status)
+      
+      console.log('Job matching system initialized for authenticated user')
       
     } catch (error) {
       console.error('Failed to initialize job matching system:', error)
-      toast.error('系统初始化失败，将使用基础匹配模式')
-    } finally {
-      setInitializingVector(false)
+      toast.error('系统初始化失败')
     }
   }
   
-  const handleRefreshVectorStore = async () => {
-    setInitializingVector(true)
+  // 构建用户画像
+  const buildUserProfile = () => {
     try {
-      await vectorStore.reloadSampleData()
-      await realTimeSearchEngine.rebuildIndex()
-      const newStats = vectorStore.getStats()
-      setVectorStats(newStats)
-      toast.success(`向量库已刷新，包含 ${newStats.vectorCount} 个职位`)
+      // 从简历分析中获取用户信息
+      const latestResume = resumes[0]
+      const profile = {
+        skills: latestResume?.analysisResult?.skills?.map(s => s.name) || [],
+        experience: '3年', // 可以从简历中提取
+        education: '本科',
+        preferredLocations: [location || '北京'],
+        expectedSalary: '20K-35K',
+        preferredCompanySize: '大型',
+        preferredIndustry: '互联网',
+        careerGoals: ['高级工程师', '技术专家'],
+        workStyle: 'flexible',
+        resumeAnalysis: latestResume?.analysisResult,
+        searchHistory: [],
+        clickHistory: [],
+        applicationHistory: []
+      }
+      
+      setUserProfile(profile)
+      intelligentMatcher.setUserProfile(profile)
+      
     } catch (error) {
-      toast.error('向量库刷新失败')
-    } finally {
-      setInitializingVector(false)
+      console.error('Failed to build user profile:', error)
     }
   }
   
@@ -115,55 +119,41 @@ const JobMatching = () => {
     setSearchTerm(query)
     
     try {
-      // 检查向量库状态
-      if (!vectorStats || vectorStats.vectorCount === 0) {
-        toast.warning('向量库为空，正在加载数据...')
-        await vectorStore.reloadSampleData()
-        await realTimeSearchEngine.rebuildIndex()
-        const newStats = vectorStore.getStats()
-        setVectorStats(newStats)
+      // 使用真实职位数据服务
+      const searchParams = {
+        query,
+        location,
+        ...filters,
+        page: 1,
+        pageSize: 20
       }
       
-      // 使用实时搜索引擎
-      const searchResult = await realTimeSearchEngine.search(query, {
-        filters: {
-          ...filters,
-          location: location || undefined
-        },
-        hitsPerPage: 10,
-        facets: ['location', 'companySize', 'industry']
-      })
+      const jobs = await jobDataService.searchRealJobs(searchParams)
       
-      // 转换结果格式
-      const jobs = searchResult.hits.map(hit => ({
-        ...hit,
-        matchScore: Math.round(hit._score * 100),
-        reasons: ['实时搜索匹配', '关键词相关'],
-        algorithm: {
-          source: 'realtime_search',
-          score: hit._score,
-          matchType: hit._matchType
-        }
-      }))
+      // 如果启用智能匹配，对结果进行个性化排序
+      let finalResults = jobs
+      if (searchMode === 'intelligent' && userProfile) {
+        finalResults = await intelligentMatcher.matchJobs(jobs)
+      }
       
-      setSearchResults(jobs)
+      setSearchResults(finalResults)
       
       // 添加到匹配记录
-      jobs.forEach(job => {
+      finalResults.forEach(job => {
         addJobMatch({
           ...job,
           searchTerm: query,
           searchLocation: location,
-          algorithm: 'realtime_search',
-          latency: searchResult.processingTime
+          algorithm: searchMode === 'intelligent' ? 'intelligent_matching' : 'realtime_search',
+          timestamp: Date.now()
         })
       })
       
-      toast.success(`找到 ${jobs.length} 个匹配职位 (${Math.round(searchResult.processingTime)}ms)`)
+      toast.success(`找到 ${finalResults.length} 个真实职位`)
       
     } catch (error) {
-      console.error('实时搜索失败:', error)
-      toast.error('搜索失败，请稍后重试')
+      console.error('搜索失败:', error)
+      toast.error(error.message || '搜索失败，请稍后重试')
     } finally {
       setSearching(false)
     }
@@ -176,74 +166,12 @@ const JobMatching = () => {
       return
     }
     
-    setSearching(true)
-    
-    try {
-      // 检查向量库状态
-      if (!vectorStats || vectorStats.vectorCount === 0) {
-        toast.warning('向量库为空，正在加载数据...')
-        await vectorStore.reloadSampleData()
-        const newStats = vectorStore.getStats()
-        setVectorStats(newStats)
-      }
-      
-      // 构建搜索请求
-      const searchRequest = {
-        query: searchTerm,
-        location,
-        filters: {
-          ...filters,
-          salaryMin: filters.salaryMin ? parseInt(filters.salaryMin) : undefined
-        },
-        userProfile: {
-          id: 'current_user',
-          skills: ['JavaScript', 'React', 'Node.js'], // 从用户数据获取
-          experience: '3年',
-          preferredLocations: location ? [location] : [],
-          expectedSalary: '20K-35K'
-        },
-        limit: 10
-      }
-      
-      // 调用高级匹配算法
-      const result = await jobMatchOrchestrator.matchJobs(searchRequest)
-      
-      setSearchResults(result.jobs)
-      
-      // 添加到匹配记录
-      result.jobs.forEach(job => {
-        addJobMatch({
-          ...job,
-          searchTerm,
-          searchLocation: location,
-          algorithm: result.algorithm,
-          latency: result.latency
-        })
-      })
-      
-      toast.success(`找到 ${result.jobs.length} 个匹配职位 (${result.latency}ms)`)
-      
-    } catch (error) {
-      console.error('搜索失败:', error)
-      toast.error('搜索失败，请稍后重试')
-    } finally {
-      setSearching(false)
-    }
+    await handleRealTimeSearch(searchTerm)
   }
   
   // 建议选择处理
   const handleSuggestionSelect = (jobData) => {
-    // 直接显示选中的职位
-    setSearchResults([{
-      ...jobData,
-      matchScore: 95,
-      reasons: ['直接选择', '精确匹配'],
-      algorithm: {
-        source: 'direct_select',
-        score: 0.95
-      }
-    }])
-    
+    setSearchResults([jobData])
     toast.success('已选择职位')
   }
   
@@ -254,15 +182,21 @@ const JobMatching = () => {
     return 'text-red-600 bg-red-100'
   }
   
-  const getAlgorithmBadge = (algorithm) => {
+  const getSourceBadge = (source) => {
     const badges = {
-      'realtime_search': { text: '实时搜索', color: 'bg-green-100 text-green-700' },
-      'advanced_ltr_v2.1': { text: 'LTR算法', color: 'bg-purple-100 text-purple-700' },
-      'direct_select': { text: '直接选择', color: 'bg-blue-100 text-blue-700' },
-      'fallback_simple': { text: '基础算法', color: 'bg-gray-100 text-gray-700' }
+      'lagou': { text: '拉勾网', color: 'bg-green-100 text-green-700' },
+      'zhipin': { text: 'Boss直聘', color: 'bg-blue-100 text-blue-700' },
+      'liepin': { text: '猎聘网', color: 'bg-purple-100 text-purple-700' },
+      'adzuna': { text: 'Adzuna', color: 'bg-orange-100 text-orange-700' },
+      'fallback': { text: '示例数据', color: 'bg-gray-100 text-gray-700' }
     }
     
-    return badges[algorithm] || badges['fallback_simple']
+    return badges[source] || badges['fallback']
+  }
+
+  // 如果用户未登录，显示认证守卫
+  if (!isAuthenticated) {
+    return <AuthGuard feature="真实职位搜索" />
   }
   
   return (
@@ -274,72 +208,36 @@ const JobMatching = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
-            智能职位匹配系统 v2.1
+            真实职位智能匹配系统
           </h1>
           <p className="text-gray-600">
-            基于实时搜索引擎和LTR算法的高级职位推荐系统
+            搜索网络上真实发布的职位，基于您的个人画像进行智能匹配
           </p>
           
-          {/* 系统状态指示器 */}
+          {/* 用户状态和系统状态 */}
           <div className="mt-4 flex justify-center">
             <div className="flex items-center space-x-4 bg-white rounded-lg shadow-sm px-4 py-2">
               <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${systemStatus?.initialized ? 'bg-green-500' : 'bg-red-500'}`} />
+                <Shield className="w-4 h-4 text-green-500" />
                 <span className="text-sm text-gray-600">
-                  {systemStatus?.initialized ? '系统就绪' : '系统离线'}
+                  已登录: {user?.name}
                 </span>
               </div>
               <div className="flex items-center space-x-2">
-                <Database className="w-4 h-4 text-blue-500" />
+                <Globe className="w-4 h-4 text-blue-500" />
                 <span className="text-sm text-gray-600">
-                  向量库: {vectorStats?.vectorCount || 0}
+                  真实职位数据
                 </span>
-                {initializingVector && (
-                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                )}
               </div>
               <div className="flex items-center space-x-2">
-                <Cpu className="w-4 h-4 text-purple-500" />
+                <Brain className="w-4 h-4 text-purple-500" />
                 <span className="text-sm text-gray-600">
-                  LTR模型: {systemStatus?.components?.ltrModel?.isLoaded ? '已加载' : '未加载'}
+                  智能匹配: {userProfile ? '已启用' : '未配置'}
                 </span>
               </div>
-              <button
-                onClick={handleRefreshVectorStore}
-                disabled={initializingVector}
-                className="p-1 hover:bg-gray-100 rounded transition-colors"
-                title="刷新向量库"
-              >
-                <RefreshCw className={`w-4 h-4 text-gray-500 ${initializingVector ? 'animate-spin' : ''}`} />
-              </button>
             </div>
           </div>
         </div>
-        
-        {/* 向量库状态警告 */}
-        {vectorStats && vectorStats.vectorCount === 0 && !initializingVector && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4"
-          >
-            <div className="flex items-center space-x-3">
-              <AlertCircle className="w-5 h-5 text-yellow-600" />
-              <div>
-                <h3 className="text-sm font-medium text-yellow-800">向量库为空</h3>
-                <p className="text-sm text-yellow-700">
-                  向量库中没有职位数据，点击刷新按钮加载示例数据，或者搜索时系统会自动加载。
-                </p>
-              </div>
-              <button
-                onClick={handleRefreshVectorStore}
-                className="px-3 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 rounded text-sm font-medium transition-colors"
-              >
-                立即加载
-              </button>
-            </div>
-          </motion.div>
-        )}
         
         {/* 搜索区域 */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
@@ -360,15 +258,15 @@ const JobMatching = () => {
                   实时搜索
                 </button>
                 <button
-                  onClick={() => setSearchMode('traditional')}
+                  onClick={() => setSearchMode('intelligent')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                    searchMode === 'traditional'
+                    searchMode === 'intelligent'
                       ? 'bg-white text-purple-600 shadow-sm'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
                 >
                   <Brain className="w-4 h-4 mr-2 inline" />
-                  高级算法
+                  智能匹配
                 </button>
               </div>
             </div>
@@ -378,12 +276,12 @@ const JobMatching = () => {
               {searchMode === 'realtime' ? (
                 <div className="flex items-center space-x-2">
                   <Zap className="w-4 h-4 text-green-500" />
-                  <span>实时搜索模式：毫秒级响应，智能建议，模糊匹配，适合快速查找</span>
+                  <span>实时搜索模式：直接搜索各大招聘平台的真实职位，快速获取最新信息</span>
                 </div>
               ) : (
                 <div className="flex items-center space-x-2">
                   <Brain className="w-4 h-4 text-purple-500" />
-                  <span>高级算法模式：LTR排序，向量检索，特征工程，适合精准匹配</span>
+                  <span>智能匹配模式：基于您的简历和偏好进行个性化匹配，推荐最适合的职位</span>
                 </div>
               )}
             </div>
@@ -395,7 +293,7 @@ const JobMatching = () => {
               <RealTimeSearchBox
                 onSearch={handleRealTimeSearch}
                 onSuggestionSelect={handleSuggestionSelect}
-                placeholder="实时搜索职位、公司、技能关键词..."
+                placeholder="搜索真实职位：公司名、职位名、技能关键词..."
                 showFilters={true}
                 autoFocus={true}
                 className="w-full"
@@ -417,12 +315,12 @@ const JobMatching = () => {
                 </div>
                 
                 <div className="text-sm text-gray-500">
-                  实时搜索已启用 · 输入即搜索
+                  搜索真实职位数据 · 多平台聚合
                 </div>
               </div>
             </div>
           ) : (
-            /* 传统搜索框 */
+            /* 智能匹配搜索框 */
             <div className="flex flex-col space-y-4">
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1">
@@ -430,10 +328,10 @@ const JobMatching = () => {
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                     <input
                       type="text"
-                      placeholder="搜索职位、公司或技能关键词"
+                      placeholder="描述您的理想职位..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
                       onKeyPress={(e) => e.key === 'Enter' && handleTraditionalSearch()}
                     />
                   </div>
@@ -446,14 +344,14 @@ const JobMatching = () => {
                       placeholder="城市"
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
                     />
                   </div>
                 </div>
                 <button
                   onClick={handleTraditionalSearch}
                   disabled={searching || !searchTerm.trim()}
-                  className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl font-medium"
+                  className="px-8 py-3 bg-gradient-to-r from-purple-500 to-blue-600 hover:from-purple-600 hover:to-blue-700 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl font-medium"
                 >
                   {searching ? (
                     <>
@@ -463,7 +361,7 @@ const JobMatching = () => {
                   ) : (
                     <>
                       <Brain className="w-5 h-5 mr-2 inline" />
-                      AI搜索
+                      智能匹配
                     </>
                   )}
                 </button>
@@ -481,12 +379,9 @@ const JobMatching = () => {
               <span>高级筛选</span>
             </button>
             
-            {systemStatus && (
-              <div className="flex items-center space-x-4 text-sm text-gray-500">
-                <span>查询次数: {systemStatus.metrics?.totalQueries || 0}</span>
-                <span>平均延迟: {Math.round(systemStatus.metrics?.avgLatency || 0)}ms</span>
-              </div>
-            )}
+            <div className="text-sm text-gray-500">
+              数据来源：拉勾网、Boss直聘、猎聘网等
+            </div>
           </div>
           
           {/* 高级筛选面板 */}
@@ -565,32 +460,27 @@ const JobMatching = () => {
                 <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                {searchMode === 'realtime' ? '实时搜索中...' : 'AI正在智能匹配职位...'}
+                正在搜索真实职位...
               </h3>
               <p className="text-gray-600 mb-4">
-                {searchMode === 'realtime' 
-                  ? '使用实时搜索引擎为您快速匹配职位'
-                  : '使用LTR算法和向量检索技术为您找到最佳职位'
-                }
+                正在从拉勾网、Boss直聘、猎聘网等平台获取最新职位信息
               </p>
               
-              {/* 算法流程指示器 */}
-              {searchMode === 'traditional' && (
-                <div className="flex justify-center space-x-4 text-sm">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-                    <span>双通道召回</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
-                    <span>特征构建</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
-                    <span>LTR排序</span>
-                  </div>
+              {/* 搜索进度指示器 */}
+              <div className="flex justify-center space-x-4 text-sm">
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
+                  <span>拉勾网</span>
                 </div>
-              )}
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
+                  <span>Boss直聘</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
+                  <span>猎聘网</span>
+                </div>
+              </div>
             </div>
           </motion.div>
         )}
@@ -604,13 +494,13 @@ const JobMatching = () => {
               </h2>
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2 text-sm text-gray-500">
-                  <Zap className="w-4 h-4" />
-                  <span>{searchMode === 'realtime' ? '实时搜索' : 'AI算法增强'}</span>
+                  <Globe className="w-4 h-4" />
+                  <span>真实职位数据</span>
                 </div>
                 <select className="px-3 py-1 border border-gray-300 rounded-lg text-sm">
                   <option>按匹配度排序</option>
-                  <option>按薪资排序</option>
                   <option>按发布时间排序</option>
+                  <option>按薪资排序</option>
                 </select>
               </div>
             </div>
@@ -628,12 +518,14 @@ const JobMatching = () => {
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-2">
                         <h3 className="text-lg font-semibold text-gray-900">{job.title}</h3>
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${getMatchColor(job.matchScore)}`}>
-                          {job.matchScore}% 匹配
-                        </span>
-                        {job.algorithm && (
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getAlgorithmBadge(job.algorithm.source || 'unknown').color}`}>
-                            {getAlgorithmBadge(job.algorithm.source || 'unknown').text}
+                        {job.matchScore && (
+                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getMatchColor(job.matchScore)}`}>
+                            {job.matchScore}% 匹配
+                          </span>
+                        )}
+                        {job.source && (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSourceBadge(job.source).color}`}>
+                            {getSourceBadge(job.source).text}
                           </span>
                         )}
                       </div>
@@ -659,45 +551,30 @@ const JobMatching = () => {
                     </div>
                   </div>
                   
-                  {/* 算法详情 */}
-                  {job.algorithm && (
-                    <div className="bg-gray-50 rounded-lg p-3 mb-4">
-                      <h4 className="font-medium text-gray-900 mb-2 flex items-center">
-                        <BarChart3 className="w-4 h-4 mr-2" />
-                        算法评分详情
+                  {/* 智能匹配详情 */}
+                  {job.matchDetails && (
+                    <div className="bg-purple-50 rounded-lg p-3 mb-4">
+                      <h4 className="font-medium text-purple-900 mb-2 flex items-center">
+                        <Brain className="w-4 h-4 mr-2" />
+                        智能匹配分析
                       </h4>
-                      <div className="grid grid-cols-3 gap-4 text-sm">
-                        {searchMode === 'realtime' ? (
-                          <>
-                            <div>
-                              <span className="text-gray-600">匹配类型:</span>
-                              <span className="ml-2 font-medium">{job.algorithm.matchType || 'exact'}</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-600">相关性评分:</span>
-                              <span className="ml-2 font-medium">{Math.round((job.algorithm.score || 0) * 100)}%</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-600">搜索引擎:</span>
-                              <span className="ml-2 font-medium">实时搜索</span>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div>
-                              <span className="text-gray-600">关键词匹配:</span>
-                              <span className="ml-2 font-medium">{Math.round((job.algorithm.keywordScore || 0) * 100)}%</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-600">语义相似度:</span>
-                              <span className="ml-2 font-medium">{Math.round((job.algorithm.vectorScore || 0) * 100)}%</span>
-                            </div>
-                            <div>
-                              <span className="text-gray-600">LTR评分:</span>
-                              <span className="ml-2 font-medium">{Math.round((job.algorithm.ltrScore || 0) * 100)}%</span>
-                            </div>
-                          </>
-                        )}
+                      <div className="grid grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-purple-600">技能匹配:</span>
+                          <span className="ml-2 font-medium">{Math.round(job.matchDetails.skillMatch)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-purple-600">经验匹配:</span>
+                          <span className="ml-2 font-medium">{Math.round(job.matchDetails.experienceMatch)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-purple-600">地点匹配:</span>
+                          <span className="ml-2 font-medium">{Math.round(job.matchDetails.locationMatch)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-purple-600">薪资匹配:</span>
+                          <span className="ml-2 font-medium">{Math.round(job.matchDetails.salaryMatch)}%</span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -716,9 +593,23 @@ const JobMatching = () => {
                     </div>
                   )}
                   
+                  {/* 改进建议 */}
+                  {job.improvements && job.improvements.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="font-medium text-gray-900 mb-2">提升建议</h4>
+                      <div className="space-y-1">
+                        {job.improvements.map((improvement, impIndex) => (
+                          <div key={impIndex} className="text-sm text-orange-700 bg-orange-50 px-2 py-1 rounded">
+                            {improvement}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* 技能要求和福利 */}
                   <div className="grid md:grid-cols-2 gap-4 mb-4">
-                    {job.requirements && (
+                    {job.requirements && job.requirements.length > 0 && (
                       <div>
                         <h4 className="font-medium text-gray-900 mb-2">技能要求</h4>
                         <div className="flex flex-wrap gap-2">
@@ -730,7 +621,7 @@ const JobMatching = () => {
                         </div>
                       </div>
                     )}
-                    {job.benefits && (
+                    {job.benefits && job.benefits.length > 0 && (
                       <div>
                         <h4 className="font-medium text-gray-900 mb-2">福利待遇</h4>
                         <div className="flex flex-wrap gap-2">
@@ -750,7 +641,20 @@ const JobMatching = () => {
                         <Star className="w-4 h-4 text-yellow-400 fill-current" />
                         <span className="text-sm text-gray-600">4.5</span>
                       </div>
-                      <span className="text-sm text-gray-500">2天前发布</span>
+                      <span className="text-sm text-gray-500">
+                        {job.publishTime ? new Date(job.publishTime).toLocaleDateString() : '最新发布'}
+                      </span>
+                      {job.sourceUrl && job.sourceUrl !== '#' && (
+                        <a
+                          href={job.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>查看原文</span>
+                        </a>
+                      )}
                     </div>
                     <div className="flex space-x-3">
                       <button className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors">
@@ -767,81 +671,33 @@ const JobMatching = () => {
           </div>
         )}
         
-        {/* 历史匹配记录 */}
-        {jobMatches.length > 0 && searchResults.length === 0 && (
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <div className="flex items-center space-x-2 mb-6">
-              <TrendingUp className="w-5 h-5 text-primary-600" />
-              <h2 className="text-xl font-semibold text-gray-900">历史匹配记录</h2>
-            </div>
-            
-            <div className="space-y-4">
-              {jobMatches.slice(0, 5).map((job, index) => (
-                <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <Briefcase className="w-8 h-8 text-gray-400" />
-                    <div>
-                      <h4 className="font-medium text-gray-900">{job.title}</h4>
-                      <p className="text-sm text-gray-500">{job.company} · {job.location}</p>
-                      {job.algorithm && (
-                        <p className="text-xs text-gray-400">算法: {job.algorithm} · 延迟: {job.latency}ms</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className={`font-semibold ${getMatchColor(job.matchScore).split(' ')[0]}`}>
-                      {job.matchScore}%
-                    </div>
-                    <div className="text-xs text-gray-500">匹配度</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        
         {/* 空状态 */}
-        {jobMatches.length === 0 && searchResults.length === 0 && !searching && (
+        {searchResults.length === 0 && !searching && (
           <div className="text-center py-12">
             <div className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Brain className="w-12 h-12 text-white" />
+              <Globe className="w-12 h-12 text-white" />
             </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">开始智能职位搜索</h3>
+            <h3 className="text-lg font-medium text-gray-900 mb-2">开始搜索真实职位</h3>
             <p className="text-gray-600 mb-6">
-              {searchMode === 'realtime' 
-                ? '使用实时搜索引擎，输入即搜索，毫秒级响应'
-                : '使用先进的LTR算法和向量检索技术，为您找到最匹配的职位'
-              }
+              搜索来自拉勾网、Boss直聘、猎聘网等平台的真实职位信息
             </p>
             <div className="grid md:grid-cols-3 gap-4 max-w-2xl mx-auto">
               <div className="text-center p-4">
-                <Target className="w-8 h-8 text-blue-500 mx-auto mb-2" />
-                <h4 className="font-medium text-gray-900">精准匹配</h4>
-                <p className="text-sm text-gray-600">多维度特征分析</p>
+                <Globe className="w-8 h-8 text-blue-500 mx-auto mb-2" />
+                <h4 className="font-medium text-gray-900">真实数据</h4>
+                <p className="text-sm text-gray-600">多平台聚合</p>
               </div>
               <div className="text-center p-4">
-                <Zap className="w-8 h-8 text-purple-500 mx-auto mb-2" />
-                <h4 className="font-medium text-gray-900">实时排序</h4>
-                <p className="text-sm text-gray-600">毫秒级响应</p>
+                <Brain className="w-8 h-8 text-purple-500 mx-auto mb-2" />
+                <h4 className="font-medium text-gray-900">智能匹配</h4>
+                <p className="text-sm text-gray-600">个性化推荐</p>
               </div>
               <div className="text-center p-4">
-                <TrendingUp className="w-8 h-8 text-green-500 mx-auto mb-2" />
-                <h4 className="font-medium text-gray-900">持续学习</h4>
-                <p className="text-sm text-gray-600">算法自我优化</p>
+                <Shield className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                <h4 className="font-medium text-gray-900">安全可靠</h4>
+                <p className="text-sm text-gray-600">数据保护</p>
               </div>
             </div>
-            
-            {/* 向量库状态提示 */}
-            {vectorStats && (
-              <div className="mt-8 bg-blue-50 rounded-lg p-4 max-w-md mx-auto">
-                <h4 className="font-medium text-blue-900 mb-2">向量库状态</h4>
-                <div className="text-sm text-blue-800 space-y-1">
-                  <div>职位数量: {vectorStats.vectorCount}</div>
-                  <div>索引大小: {vectorStats.indexSize}</div>
-                  <div>内存使用: {vectorStats.memoryUsage}</div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
