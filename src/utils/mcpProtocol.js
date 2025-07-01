@@ -11,6 +11,7 @@ export class MCPManager {
     this.resources = new Map()
     this.prompts = new Map()
     this.isInitialized = false
+    this.configurations = new Map()
   }
 
   /**
@@ -25,11 +26,102 @@ export class MCPManager {
           await this.loadConfiguration(JSON.parse(config.config))
         }
       }
+      
+      // 加载默认工具和提示
+      await this.loadDefaultTools()
+      await this.loadDefaultPrompts()
+      
       this.isInitialized = true
       console.log('MCP Manager initialized successfully')
     } catch (error) {
       console.error('Failed to initialize MCP Manager:', error)
     }
+  }
+
+  /**
+   * 导入JSON配置
+   * @param {Object} jsonConfig - JSON配置对象
+   */
+  async importJSONConfig(jsonConfig) {
+    try {
+      // 验证配置格式
+      if (!this.validateMCPConfig(jsonConfig)) {
+        throw new Error('Invalid MCP configuration format')
+      }
+
+      // 保存配置
+      const configId = Date.now().toString()
+      this.configurations.set(configId, jsonConfig)
+      
+      // 加载配置
+      await this.loadConfiguration(jsonConfig)
+      
+      // 持久化保存
+      await this.saveConfigurations()
+      
+      console.log('MCP JSON configuration imported successfully')
+      return configId
+    } catch (error) {
+      console.error('Failed to import MCP JSON config:', error)
+      throw error
+    }
+  }
+
+  /**
+   * 导出JSON配置
+   * @param {string} configId - 配置ID
+   * @returns {Object} JSON配置
+   */
+  exportJSONConfig(configId) {
+    const config = this.configurations.get(configId)
+    if (!config) {
+      throw new Error(`Configuration ${configId} not found`)
+    }
+    return config
+  }
+
+  /**
+   * 验证MCP配置格式
+   * @param {Object} config - 配置对象
+   * @returns {boolean} 是否有效
+   */
+  validateMCPConfig(config) {
+    const requiredFields = ['mcpServers', 'tools', 'resources', 'prompts']
+    
+    // 检查基本结构
+    if (!config || typeof config !== 'object') {
+      return false
+    }
+
+    // 检查必需字段
+    for (const field of requiredFields) {
+      if (!(field in config)) {
+        console.warn(`Missing required field: ${field}`)
+        return false
+      }
+    }
+
+    // 验证服务器配置
+    if (config.mcpServers && typeof config.mcpServers === 'object') {
+      for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
+        if (!serverConfig.command || !Array.isArray(serverConfig.args)) {
+          console.warn(`Invalid server config for ${name}`)
+          return false
+        }
+      }
+    }
+
+    // 验证工具配置
+    if (config.tools && typeof config.tools === 'object') {
+      for (const [name, toolConfig] of Object.entries(config.tools)) {
+        if (!toolConfig.description || !toolConfig.inputSchema) {
+          console.warn(`Invalid tool config for ${name}`)
+          return false
+        }
+      }
+    }
+
+    return true
   }
 
   /**
@@ -246,6 +338,146 @@ export class MCPManager {
   }
 
   /**
+   * 加载默认工具
+   */
+  async loadDefaultTools() {
+    const defaultTools = {
+      resume_analyzer: {
+        description: '分析简历内容，提供匹配度评分和改进建议',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            resumeText: { type: 'string', description: '简历文本内容' },
+            targetPosition: { type: 'string', description: '目标职位' }
+          },
+          required: ['resumeText', 'targetPosition']
+        },
+        type: 'resume_analyzer'
+      },
+      interview_scorer: {
+        description: '评估面试回答质量，提供评分和反馈',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: '面试问题' },
+            answer: { type: 'string', description: '用户回答' },
+            category: { type: 'string', description: '问题类别' },
+            difficulty: { type: 'string', description: '难度级别' }
+          },
+          required: ['question', 'answer']
+        },
+        type: 'interview_scorer'
+      },
+      job_matcher: {
+        description: '匹配用户画像与职位要求，计算匹配度',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            userProfile: { type: 'object', description: '用户画像' },
+            jobRequirements: { type: 'object', description: '职位要求' }
+          },
+          required: ['userProfile', 'jobRequirements']
+        },
+        type: 'job_matcher'
+      },
+      skill_assessor: {
+        description: '评估技能水平，生成学习路径建议',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            skills: { type: 'array', description: '技能列表' },
+            targetLevel: { type: 'string', description: '目标水平' }
+          },
+          required: ['skills']
+        },
+        type: 'skill_assessor'
+      }
+    }
+
+    for (const [name, config] of Object.entries(defaultTools)) {
+      this.registerTool(name, config)
+    }
+  }
+
+  /**
+   * 加载默认提示模板
+   */
+  async loadDefaultPrompts() {
+    const defaultPrompts = {
+      interview_coach: {
+        template: `你是一位专业的面试教练。请根据以下信息为候选人提供面试指导：
+
+问题：{{question}}
+候选人回答：{{answer}}
+
+请从以下几个维度进行评估：
+1. 回答的相关性和准确性
+2. 表达的清晰度和逻辑性
+3. 内容的深度和广度
+4. 改进建议和最佳实践
+
+请提供建设性的反馈，帮助候选人提升面试表现。`,
+        variables: ['question', 'answer'],
+        triggers: ['面试', '回答', '评估', '反馈']
+      },
+      resume_optimizer: {
+        template: `你是一位资深的简历优化专家。请分析以下简历内容：
+
+简历内容：{{resumeContent}}
+目标职位：{{targetPosition}}
+
+请提供以下分析：
+1. 简历与目标职位的匹配度
+2. 关键技能和经验的突出程度
+3. 简历结构和格式的专业性
+4. 具体的优化建议和改进方向
+
+请确保建议具体可行，有助于提升简历的竞争力。`,
+        variables: ['resumeContent', 'targetPosition'],
+        triggers: ['简历', '优化', '分析', '匹配']
+      },
+      career_advisor: {
+        template: `你是一位经验丰富的职业规划顾问。基于以下信息为用户提供职业发展建议：
+
+当前技能：{{currentSkills}}
+职业目标：{{careerGoals}}
+工作经验：{{experience}}
+
+请提供：
+1. 职业发展路径分析
+2. 技能提升优先级建议
+3. 学习资源和方法推荐
+4. 短期和长期目标规划
+
+请确保建议切实可行，符合当前市场趋势。`,
+        variables: ['currentSkills', 'careerGoals', 'experience'],
+        triggers: ['职业规划', '发展', '技能', '目标']
+      }
+    }
+
+    for (const [name, config] of Object.entries(defaultPrompts)) {
+      this.registerPrompt(name, config)
+    }
+  }
+
+  /**
+   * 保存配置到本地存储
+   */
+  async saveConfigurations() {
+    try {
+      const configs = Array.from(this.configurations.entries()).map(([id, config]) => ({
+        id,
+        config: JSON.stringify(config),
+        createdAt: new Date().toISOString()
+      }))
+      
+      localStorage.setItem('mcp-configs', JSON.stringify(configs))
+    } catch (error) {
+      console.error('Failed to save MCP configurations:', error)
+    }
+  }
+
+  /**
    * 获取状态信息
    * @returns {Object} 状态信息
    */
@@ -256,10 +488,59 @@ export class MCPManager {
       tools: this.tools.size,
       resources: this.resources.size,
       prompts: this.prompts.size,
+      configurations: this.configurations.size,
       serverList: Array.from(this.servers.keys()),
       toolList: Array.from(this.tools.keys()),
       resourceList: Array.from(this.resources.keys()),
       promptList: Array.from(this.prompts.keys())
+    }
+  }
+
+  /**
+   * 生成示例MCP配置
+   * @returns {Object} 示例配置
+   */
+  generateSampleConfig() {
+    return {
+      mcpServers: {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"],
+          "env": {}
+        },
+        "git": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-git", "--repository", "/path/to/git/repo"],
+          "env": {}
+        }
+      },
+      tools: {
+        "code_analyzer": {
+          "description": "分析代码质量和结构",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string", "description": "代码内容" },
+              "language": { "type": "string", "description": "编程语言" }
+            },
+            "required": ["code"]
+          }
+        }
+      },
+      resources: {
+        "documentation": {
+          "uri": "file:///path/to/docs",
+          "type": "file",
+          "keywords": ["文档", "帮助", "说明"]
+        }
+      },
+      prompts: {
+        "code_review": {
+          "template": "请审查以下代码：\n\n{{code}}\n\n请提供改进建议。",
+          "variables": ["code"],
+          "triggers": ["代码", "审查", "review"]
+        }
+      }
     }
   }
 }
@@ -323,16 +604,27 @@ class MCPTool {
     this.name = name
     this.config = config
     this.description = config.description || ''
-    this.parameters = config.parameters || {}
+    this.inputSchema = config.inputSchema || {}
     this.handler = config.handler || this.defaultHandler
   }
 
   async execute(params) {
     try {
+      // 验证输入参数
+      this.validateInput(params)
       return await this.handler(params)
     } catch (error) {
       console.error(`Tool '${this.name}' execution error:`, error)
       throw error
+    }
+  }
+
+  validateInput(params) {
+    const required = this.inputSchema.required || []
+    for (const field of required) {
+      if (!(field in params)) {
+        throw new Error(`Missing required parameter: ${field}`)
+      }
     }
   }
 
@@ -359,30 +651,44 @@ class MCPTool {
     return {
       matchScore: Math.floor(Math.random() * 30) + 70,
       skills: [
-        { name: 'JavaScript', level: 85 },
-        { name: 'React', level: 78 },
-        { name: '项目管理', level: 72 }
+        { name: 'JavaScript', level: 85, matched: true },
+        { name: 'React', level: 78, matched: true },
+        { name: '项目管理', level: 72, matched: false }
       ],
-      suggestions: [
+      strengths: [
+        '技术能力扎实，具备丰富的前端开发经验',
+        '项目经验丰富，参与过多个大型项目'
+      ],
+      improvements: [
         '增加更多技术深度描述',
-        '添加具体项目成果数据',
-        '完善教育背景信息'
-      ]
+        '添加具体项目成果数据'
+      ],
+      overallScore: Math.floor(Math.random() * 20) + 80
     }
   }
 
   async scoreInterview(params) {
-    const { question, answer } = params
+    const { question, answer, category, difficulty } = params
     
     // 模拟面试评分
+    const baseScore = Math.floor(Math.random() * 30) + 70
+    const difficultyMultiplier = difficulty === '高级' ? 0.9 : difficulty === '中级' ? 0.95 : 1.0
+    const finalScore = Math.round(baseScore * difficultyMultiplier)
+    
     return {
-      score: Math.floor(Math.random() * 30) + 70,
-      feedback: '回答结构清晰，建议增加具体案例',
+      score: finalScore,
+      feedback: '回答结构清晰，建议增加具体案例支撑观点',
       criteria: {
-        relevance: 85,
-        clarity: 78,
-        depth: 72
-      }
+        relevance: Math.floor(Math.random() * 20) + 80,
+        clarity: Math.floor(Math.random() * 20) + 75,
+        depth: Math.floor(Math.random() * 20) + 70,
+        structure: Math.floor(Math.random() * 20) + 85
+      },
+      suggestions: [
+        '可以提供更具体的实例',
+        '建议增加量化数据支撑',
+        '表达可以更加简洁明了'
+      ]
     }
   }
 
@@ -392,8 +698,12 @@ class MCPTool {
     // 模拟职位匹配
     return {
       matchScore: Math.floor(Math.random() * 40) + 60,
-      reasons: ['技能匹配度高', '经验符合要求'],
-      recommendations: ['提升系统设计能力', '增加项目管理经验']
+      reasons: ['技能匹配度高', '经验符合要求', '地点偏好一致'],
+      missingSkills: ['系统设计', '高并发处理'],
+      recommendations: ['提升系统设计能力', '增加项目管理经验'],
+      salaryMatch: 85,
+      locationMatch: 100,
+      experienceMatch: 90
     }
   }
 
@@ -403,10 +713,17 @@ class MCPTool {
     // 模拟技能评估
     return {
       currentLevel: 'intermediate',
-      gaps: ['系统设计', '高并发处理'],
+      targetLevel: targetLevel || 'advanced',
+      gaps: ['系统设计', '高并发处理', '团队管理'],
       learningPath: [
-        { skill: '数据结构', estimatedTime: '2周' },
-        { skill: '算法优化', estimatedTime: '3周' }
+        { skill: '数据结构与算法', estimatedTime: '2周', priority: 'high' },
+        { skill: '系统设计原理', estimatedTime: '4周', priority: 'high' },
+        { skill: '项目管理', estimatedTime: '3周', priority: 'medium' }
+      ],
+      recommendations: [
+        '建议先从基础算法开始',
+        '可以通过实际项目练习系统设计',
+        '参加相关认证考试提升竞争力'
       ]
     }
   }
@@ -415,7 +732,7 @@ class MCPTool {
     return {
       name: this.name,
       description: this.description,
-      parameters: this.parameters
+      inputSchema: this.inputSchema
     }
   }
 }
@@ -530,33 +847,51 @@ export const defaultTools = {
   resume_analyzer: {
     type: 'resume_analyzer',
     description: '分析简历内容，提供匹配度评分和改进建议',
-    parameters: {
-      resumeText: { type: 'string', required: true },
-      targetPosition: { type: 'string', required: true }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        resumeText: { type: 'string', description: '简历文本内容' },
+        targetPosition: { type: 'string', description: '目标职位' }
+      },
+      required: ['resumeText', 'targetPosition']
     }
   },
   interview_scorer: {
     type: 'interview_scorer',
     description: '评估面试回答质量，提供评分和反馈',
-    parameters: {
-      question: { type: 'string', required: true },
-      answer: { type: 'string', required: true }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: '面试问题' },
+        answer: { type: 'string', description: '用户回答' },
+        category: { type: 'string', description: '问题类别' },
+        difficulty: { type: 'string', description: '难度级别' }
+      },
+      required: ['question', 'answer']
     }
   },
   job_matcher: {
     type: 'job_matcher',
     description: '匹配用户画像与职位要求，计算匹配度',
-    parameters: {
-      userProfile: { type: 'object', required: true },
-      jobRequirements: { type: 'object', required: true }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        userProfile: { type: 'object', description: '用户画像' },
+        jobRequirements: { type: 'object', description: '职位要求' }
+      },
+      required: ['userProfile', 'jobRequirements']
     }
   },
   skill_assessor: {
     type: 'skill_assessor',
     description: '评估技能水平，生成学习路径建议',
-    parameters: {
-      skills: { type: 'array', required: true },
-      targetLevel: { type: 'string', required: false }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        skills: { type: 'array', description: '技能列表' },
+        targetLevel: { type: 'string', description: '目标水平' }
+      },
+      required: ['skills']
     }
   }
 }

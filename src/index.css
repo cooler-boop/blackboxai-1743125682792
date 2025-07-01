@@ -11,6 +11,11 @@
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    scroll-behavior: smooth;
+  }
+
+  html {
+    scroll-behavior: smooth;
   }
 }
 
@@ -24,7 +29,11 @@
   }
   
   .card {
-    @apply bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 hover:shadow-xl transition-all duration-300;
+    @apply bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6 hover:shadow-xl transition-all duration-300 hover:scale-[1.02];
+  }
+  
+  .card-hover {
+    @apply transform transition-all duration-300 hover:scale-[1.02] hover:shadow-xl hover:-translate-y-1;
   }
   
   .input-field {
@@ -37,6 +46,11 @@
   
   .gradient-text {
     @apply bg-gradient-to-r from-blue-600 via-purple-600 to-cyan-600 bg-clip-text text-transparent;
+  }
+  
+  .smooth-scroll {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
   }
   
   .slider {
@@ -82,6 +96,31 @@
   .slider::-moz-range-thumb:hover {
     transform: scale(1.2);
     box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  /* 新增平滑滚动和触摸优化 */
+  .smooth-scroll-container {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  /* 触摸反馈 */
+  .touch-feedback {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  /* 弹性滚动 */
+  .elastic-scroll {
+    overscroll-behavior: auto;
+    scroll-snap-type: y proximity;
+  }
+
+  /* 惯性滚动 */
+  .momentum-scroll {
+    -webkit-overflow-scrolling: touch;
+    overflow-scrolling: touch;
   }
 }
 
@@ -142,6 +181,22 @@
 
 .animate-spin-slow {
   animation: spin 3s linear infinite;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.5s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.5s ease-out;
+}
+
+.animate-zoom-in {
+  animation: zoomIn 0.3s ease-out;
+}
+
+.animate-flip {
+  animation: flip 0.6s ease-in-out;
 }
 
 @keyframes fadeIn {
@@ -213,6 +268,54 @@
   }
 }
 
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes zoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes flip {
+  0% {
+    transform: perspective(400px) rotateY(0);
+  }
+  40% {
+    transform: perspective(400px) rotateY(-90deg);
+  }
+  60% {
+    transform: perspective(400px) rotateY(-90deg);
+  }
+  100% {
+    transform: perspective(400px) rotateY(0);
+  }
+}
+
 /* 响应式字体优化 */
 @media (max-width: 640px) {
   html {
@@ -253,6 +356,10 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+  
+  .smooth-scroll {
+    scroll-behavior: auto;
   }
 }
 
@@ -377,4 +484,245 @@ select:focus-visible {
 .ripple:active::before {
   width: 300px;
   height: 300px;
+}
+
+/* 平滑滚动增强 */
+.smooth-scroll-enhanced {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-snap-type: y proximity;
+}
+
+/* 触摸优化 */
+.touch-optimized {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* 弹性动画 */
+.elastic-animation {
+  transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* 磁性效果 */
+.magnetic-effect {
+  transition: transform 0.2s ease-out;
+}
+
+.magnetic-effect:hover {
+  transform: scale(1.05) translateZ(0);
+}
+
+/* 视差滚动 */
+.parallax {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* 性能优化 */
+.gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* 流体动画 */
+.fluid-animation {
+  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* 微交互 */
+.micro-interaction {
+  transition: all 0.15s ease-out;
+}
+
+.micro-interaction:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.micro-interaction:active {
+  transform: translateY(0);
+  transition-duration: 0.05s;
+}
+
+/* 呼吸动画 */
+.breathe {
+  animation: breathe 4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+/* 波纹扩散 */
+.ripple-expand {
+  animation: rippleExpand 2s ease-out infinite;
+}
+
+@keyframes rippleExpand {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* 渐变边框 */
+.gradient-border {
+  position: relative;
+  background: linear-gradient(45deg, #3b82f6, #8b5cf6, #06b6d4);
+  background-size: 400% 400%;
+  animation: gradientShift 3s ease infinite;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: white;
+  border-radius: inherit;
+  z-index: -1;
+}
+
+@keyframes gradientShift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* 3D 翻转效果 */
+.flip-3d {
+  perspective: 1000px;
+}
+
+.flip-3d-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  transition: transform 0.6s;
+  transform-style: preserve-3d;
+}
+
+.flip-3d:hover .flip-3d-inner {
+  transform: rotateY(180deg);
+}
+
+.flip-3d-front,
+.flip-3d-back {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+}
+
+.flip-3d-back {
+  transform: rotateY(180deg);
+}
+
+/* 粒子效果背景 */
+.particles-bg {
+  position: relative;
+  overflow: hidden;
+}
+
+.particles-bg::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: radial-gradient(circle, rgba(59, 130, 246, 0.1) 1px, transparent 1px);
+  background-size: 50px 50px;
+  animation: particleFloat 20s linear infinite;
+}
+
+@keyframes particleFloat {
+  0% {
+    transform: translateY(0) translateX(0);
+  }
+  100% {
+    transform: translateY(-100px) translateX(50px);
+  }
+}
+
+/* 霓虹灯效果 */
+.neon-glow {
+  text-shadow: 
+    0 0 5px currentColor,
+    0 0 10px currentColor,
+    0 0 15px currentColor,
+    0 0 20px #3b82f6,
+    0 0 35px #3b82f6,
+    0 0 40px #3b82f6;
+  animation: neonFlicker 2s ease-in-out infinite alternate;
+}
+
+@keyframes neonFlicker {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
+/* 液体动画 */
+.liquid-animation {
+  background: linear-gradient(-45deg, #3b82f6, #8b5cf6, #06b6d4, #10b981);
+  background-size: 400% 400%;
+  animation: liquidFlow 15s ease infinite;
+}
+
+@keyframes liquidFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* 玻璃态效果增强 */
+.glassmorphism {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+/* 新拟态效果 */
+.neumorphism {
+  background: #f0f0f0;
+  box-shadow: 
+    20px 20px 60px #d1d1d1,
+    -20px -20px 60px #ffffff;
+}
+
+.neumorphism-inset {
+  background: #f0f0f0;
+  box-shadow: 
+    inset 20px 20px 60px #d1d1d1,
+    inset -20px -20px 60px #ffffff;
 }
