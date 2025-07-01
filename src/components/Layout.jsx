@@ -9,19 +9,29 @@ import {
   User,
   Brain,
   Menu,
-  X
+  X,
+  FileText,
+  Target,
+  Briefcase,
+  LayoutDashboard
 } from 'lucide-react'
+import useAuthStore from '../store/authStore'
 
 const Layout = ({ children }) => {
   const location = useLocation()
+  const { user } = useAuthStore()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false)
 
   const navigation = [
     { name: '首页', href: '/', icon: Home },
-    { name: '面试', href: '/interview', icon: MessageCircle },
-    { name: '练习', href: '/practice', icon: BookOpen },
-    { name: '分析', href: '/analytics', icon: BarChart3 },
-    { name: '个人', href: '/profile', icon: User },
+    { name: '控制台', href: '/dashboard', icon: LayoutDashboard },
+    { name: '简历分析', href: '/resume-analysis', icon: FileText },
+    { name: '面试练习', href: '/interview', icon: MessageCircle },
+    { name: '题库练习', href: '/practice', icon: BookOpen },
+    { name: '数据分析', href: '/analytics', icon: BarChart3 },
+    { name: '职业规划', href: '/career-planning', icon: Target },
+    { name: '职位匹配', href: '/job-matching', icon: Briefcase },
+    { name: '个人中心', href: '/profile', icon: User },
   ]
 
   const isActive = (path) => location.pathname === path
@@ -38,10 +48,15 @@ const Layout = ({ children }) => {
                 <Brain className="w-5 h-5 text-white" />
               </div>
               <span className="text-xl font-bold text-gray-900">AI面试助手</span>
+              {user?.isTrialUser && (
+                <span className="px-2 py-1 bg-orange-100 text-orange-600 text-xs rounded-full">
+                  试用版
+                </span>
+              )}
             </div>
 
             {/* Desktop Navigation */}
-            <nav className="hidden md:flex space-x-8">
+            <nav className="hidden lg:flex space-x-1">
               {navigation.map((item) => {
                 const Icon = item.icon
                 return (
@@ -61,13 +76,21 @@ const Layout = ({ children }) => {
               })}
             </nav>
 
-            {/* Mobile menu button */}
-            <button
-              className="md:hidden p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-50"
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            >
-              {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
+            {/* User Info & Mobile menu button */}
+            <div className="flex items-center space-x-4">
+              {user && (
+                <div className="hidden md:flex items-center space-x-2 text-sm text-gray-600">
+                  <span>欢迎，{user.name}</span>
+                </div>
+              )}
+              
+              <button
+                className="lg:hidden p-2 rounded-lg text-gray-600 hover:text-gray-900 hover:bg-gray-50"
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              >
+                {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -77,9 +100,9 @@ const Layout = ({ children }) => {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="md:hidden bg-white border-t border-gray-200"
+            className="lg:hidden bg-white border-t border-gray-200"
           >
-            <div className="px-4 py-2 space-y-1">
+            <div className="px-4 py-2 space-y-1 max-h-96 overflow-y-auto">
               {navigation.map((item) => {
                 const Icon = item.icon
                 return (
@@ -113,6 +136,9 @@ const Layout = ({ children }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center text-gray-600">
             <p>&copy; 2024 AI智能面试助手. 专业的面试准备平台.</p>
+            <p className="text-sm mt-2">
+              支持10个AI提供商 · 完整功能模块 · 生产就绪
+            </p>
           </div>
         </div>
       </footer>
