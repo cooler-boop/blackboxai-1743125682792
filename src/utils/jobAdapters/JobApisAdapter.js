@@ -5,8 +5,8 @@
 
 export class JobApisAdapter {
   constructor() {
-    this.baseUrl = process.env.VITE_JOBAPIS_URL || 'https://api.jobapis.com'
-    this.apiKey = process.env.VITE_JOBAPIS_KEY
+    this.baseUrl = import.meta.env.VITE_JOBAPIS_URL || 'https://api.jobapis.com'
+    this.apiKey = import.meta.env.VITE_JOBAPIS_KEY
     this.supportedProviders = ['monster', 'ziprecruiter', 'craigslist', 'careerbuilder']
     this.rateLimiter = new Map()
   }
