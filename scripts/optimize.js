@@ -1,50 +1,59 @@
-import fs from 'fs';
-import path from 'path';
-import { minify } from 'terser';
-import CleanCSS from 'clean-css';
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
-const cleanCSS = new CleanCSS();
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
-// Optimize JavaScript files
-async function optimizeJS() {
-    const jsFiles = ['js/newApp.js', 'js/newRouter.js'];
-    
-    for (const file of jsFiles) {
-        if (fs.existsSync(file)) {
-            const code = fs.readFileSync(file, 'utf8');
-            const result = await minify(code, {
-                compress: true,
-                mangle: true
-            });
-            
-            if (result.code) {
-                const optimizedFile = file.replace('.js', '.min.js');
-                fs.writeFileSync(optimizedFile, result.code);
-                console.log(`✅ 优化完成: ${optimizedFile}`);
-            }
-        }
-    }
+// 优化构建输出
+function optimizeBuild() {
+  const distPath = path.join(__dirname, '../dist')
+  
+  if (!fs.existsSync(distPath)) {
+    console.log('❌ 构建目录不存在，请先运行 npm run build')
+    return
+  }
+
+  console.log('🔧 开始优化构建输出...')
+
+  // 分析构建文件大小
+  function analyzeFiles(dir, prefix = '') {
+    const files = fs.readdirSync(dir)
+    let totalSize = 0
+
+    files.forEach(file => {
+      const filePath = path.join(dir, file)
+      const stat = fs.statSync(filePath)
+      
+      if (stat.isDirectory()) {
+        totalSize += analyzeFiles(filePath, prefix + file + '/')
+      } else {
+        const sizeKB = (stat.size / 1024).toFixed(2)
+        console.log(`📄 ${prefix}${file}: ${sizeKB} KB`)
+        totalSize += stat.size
+      }
+    })
+
+    return totalSize
+  }
+
+  const totalSize = analyzeFiles(distPath)
+  console.log(`📊 总构建大小: ${(totalSize / 1024 / 1024).toFixed(2)} MB`)
+
+  // 生成构建报告
+  const report = {
+    timestamp: new Date().toISOString(),
+    totalSize: totalSize,
+    totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
+    files: []
+  }
+
+  fs.writeFileSync(
+    path.join(distPath, 'build-report.json'),
+    JSON.stringify(report, null, 2)
+  )
+
+  console.log('✅ 构建优化完成！')
 }
 
-// Optimize CSS files
-function optimizeCSS() {
-    const cssFiles = ['styles/main.css'];
-    
-    for (const file of cssFiles) {
-        if (fs.existsSync(file)) {
-            const css = fs.readFileSync(file, 'utf8');
-            const result = cleanCSS.minify(css);
-            
-            if (!result.errors.length) {
-                const optimizedFile = file.replace('.css', '.min.css');
-                fs.writeFileSync(optimizedFile, result.styles);
-                console.log(`✅ 优化完成: ${optimizedFile}`);
-            }
-        }
-    }
-}
-
-console.log('🔧 开始优化资源...');
-await optimizeJS();
-optimizeCSS();
-console.log('✨ 优化完成！');
+optimizeBuild()

@@ -1,56 +1,31 @@
-import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import compression from 'compression';
-import helmet from 'helmet';
-import cors from 'cors';
+import express from 'express'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
-const app = express();
-const port = process.env.PORT || 8000;
+const app = express()
+const port = process.env.PORT || 3000
 
-// Security and performance middleware
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://cdnjs.cloudflare.com"],
-            scriptSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "https:"],
-            fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
-            connectSrc: ["'self'"]
-        }
-    }
-}));
+// 静态文件服务
+app.use(express.static(path.join(__dirname, 'dist')))
 
-app.use(compression());
-app.use(cors());
-
-// Cache static assets
-app.use(express.static(path.join(__dirname), {
-    maxAge: '1d',
-    etag: true
-}));
-
-// API routes for future expansion
+// API 路由
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    service: 'AI Interview Assistant'
+  })
+})
 
-// Handle SPA routing
+// SPA 路由处理
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// Error handling
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Something went wrong!' });
-});
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'))
+})
 
 app.listen(port, () => {
-    console.log(`🚀 百瓜社交应用运行在 http://localhost:${port}`);
-    console.log('按 Ctrl+C 停止服务器');
-});
+  console.log(`🚀 AI智能面试助手服务器运行在 http://localhost:${port}`)
+  console.log('📱 应用已准备就绪')
+})
