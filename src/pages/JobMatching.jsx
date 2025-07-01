@@ -16,10 +16,13 @@ import {
   Settings,
   BarChart3,
   Cpu,
-  Database
+  Database,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react'
 import useDataStore from '../store/dataStore'
 import { jobMatchOrchestrator } from '../utils/jobMatchOrchestrator'
+import { vectorStore } from '../utils/vectorStore'
 import toast from 'react-hot-toast'
 
 const JobMatching = () => {
@@ -30,6 +33,8 @@ const JobMatching = () => {
   const [searchResults, setSearchResults] = useState([])
   const [systemStatus, setSystemStatus] = useState(null)
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
+  const [vectorStats, setVectorStats] = useState(null)
+  const [initializingVector, setInitializingVector] = useState(false)
   const [filters, setFilters] = useState({
     salaryMin: '',
     experience: '',
@@ -44,13 +49,51 @@ const JobMatching = () => {
   
   const initializeSystem = async () => {
     try {
+      setInitializingVector(true)
+      
+      // 初始化向量存储
+      await vectorStore.initialize()
+      
+      // 初始化职位匹配编排器
       await jobMatchOrchestrator.initialize()
+      
+      // 获取系统状态
       const status = jobMatchOrchestrator.getStatus()
+      const vStats = vectorStore.getStats()
+      
       setSystemStatus(status)
+      setVectorStats(vStats)
+      
       console.log('Job matching system initialized:', status)
+      console.log('Vector store stats:', vStats)
+      
+      if (vStats.vectorCount === 0) {
+        toast.info('正在加载示例职位数据...')
+        await vectorStore.reloadSampleData()
+        const newStats = vectorStore.getStats()
+        setVectorStats(newStats)
+        toast.success(`已加载 ${newStats.vectorCount} 个职位到向量库`)
+      }
+      
     } catch (error) {
       console.error('Failed to initialize job matching system:', error)
       toast.error('系统初始化失败，将使用基础匹配模式')
+    } finally {
+      setInitializingVector(false)
+    }
+  }
+  
+  const handleRefreshVectorStore = async () => {
+    setInitializingVector(true)
+    try {
+      await vectorStore.reloadSampleData()
+      const newStats = vectorStore.getStats()
+      setVectorStats(newStats)
+      toast.success(`向量库已刷新，包含 ${newStats.vectorCount} 个职位`)
+    } catch (error) {
+      toast.error('向量库刷新失败')
+    } finally {
+      setInitializingVector(false)
     }
   }
   
@@ -63,6 +106,14 @@ const JobMatching = () => {
     setSearching(true)
     
     try {
+      // 检查向量库状态
+      if (!vectorStats || vectorStats.vectorCount === 0) {
+        toast.warning('向量库为空，正在加载数据...')
+        await vectorStore.reloadSampleData()
+        const newStats = vectorStore.getStats()
+        setVectorStats(newStats)
+      }
+      
       // 构建搜索请求
       const searchRequest = {
         query: searchTerm,
@@ -139,31 +190,65 @@ const JobMatching = () => {
           </p>
           
           {/* 系统状态指示器 */}
-          {systemStatus && (
-            <div className="mt-4 flex justify-center">
-              <div className="flex items-center space-x-4 bg-white rounded-lg shadow-sm px-4 py-2">
-                <div className="flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${systemStatus.initialized ? 'bg-green-500' : 'bg-red-500'}`} />
-                  <span className="text-sm text-gray-600">
-                    {systemStatus.initialized ? '系统就绪' : '系统离线'}
-                  </span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Database className="w-4 h-4 text-blue-500" />
-                  <span className="text-sm text-gray-600">
-                    向量库: {systemStatus.components?.vectorStore?.vectorCount || 0}
-                  </span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Cpu className="w-4 h-4 text-purple-500" />
-                  <span className="text-sm text-gray-600">
-                    LTR模型: {systemStatus.components?.ltrModel?.isLoaded ? '已加载' : '未加载'}
-                  </span>
-                </div>
+          <div className="mt-4 flex justify-center">
+            <div className="flex items-center space-x-4 bg-white rounded-lg shadow-sm px-4 py-2">
+              <div className="flex items-center space-x-2">
+                <div className={`w-2 h-2 rounded-full ${systemStatus?.initialized ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm text-gray-600">
+                  {systemStatus?.initialized ? '系统就绪' : '系统离线'}
+                </span>
               </div>
+              <div className="flex items-center space-x-2">
+                <Database className="w-4 h-4 text-blue-500" />
+                <span className="text-sm text-gray-600">
+                  向量库: {vectorStats?.vectorCount || 0}
+                </span>
+                {initializingVector && (
+                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                )}
+              </div>
+              <div className="flex items-center space-x-2">
+                <Cpu className="w-4 h-4 text-purple-500" />
+                <span className="text-sm text-gray-600">
+                  LTR模型: {systemStatus?.components?.ltrModel?.isLoaded ? '已加载' : '未加载'}
+                </span>
+              </div>
+              <button
+                onClick={handleRefreshVectorStore}
+                disabled={initializingVector}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title="刷新向量库"
+              >
+                <RefreshCw className={`w-4 h-4 text-gray-500 ${initializingVector ? 'animate-spin' : ''}`} />
+              </button>
             </div>
-          )}
+          </div>
         </div>
+        
+        {/* 向量库状态警告 */}
+        {vectorStats && vectorStats.vectorCount === 0 && !initializingVector && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4"
+          >
+            <div className="flex items-center space-x-3">
+              <AlertCircle className="w-5 h-5 text-yellow-600" />
+              <div>
+                <h3 className="text-sm font-medium text-yellow-800">向量库为空</h3>
+                <p className="text-sm text-yellow-700">
+                  向量库中没有职位数据，点击刷新按钮加载示例数据，或者搜索时系统会自动加载。
+                </p>
+              </div>
+              <button
+                onClick={handleRefreshVectorStore}
+                className="px-3 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 rounded text-sm font-medium transition-colors"
+              >
+                立即加载
+              </button>
+            </div>
+          </motion.div>
+        )}
         
         {/* 搜索区域 */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
@@ -541,6 +626,18 @@ const JobMatching = () => {
                 <p className="text-sm text-gray-600">算法自我优化</p>
               </div>
             </div>
+            
+            {/* 向量库状态提示 */}
+            {vectorStats && (
+              <div className="mt-8 bg-blue-50 rounded-lg p-4 max-w-md mx-auto">
+                <h4 className="font-medium text-blue-900 mb-2">向量库状态</h4>
+                <div className="text-sm text-blue-800 space-y-1">
+                  <div>职位数量: {vectorStats.vectorCount}</div>
+                  <div>索引大小: {vectorStats.indexSize}</div>
+                  <div>内存使用: {vectorStats.memoryUsage}</div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
