@@ -23,6 +23,8 @@ import {
 import useDataStore from '../store/dataStore'
 import { jobMatchOrchestrator } from '../utils/jobMatchOrchestrator'
 import { vectorStore } from '../utils/vectorStore'
+import { realTimeSearchEngine } from '../utils/realTimeSearch'
+import RealTimeSearchBox from '../components/RealTimeSearchBox'
 import toast from 'react-hot-toast'
 
 const JobMatching = () => {
@@ -35,6 +37,7 @@ const JobMatching = () => {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
   const [vectorStats, setVectorStats] = useState(null)
   const [initializingVector, setInitializingVector] = useState(false)
+  const [searchMode, setSearchMode] = useState('realtime') // 'realtime' | 'traditional'
   const [filters, setFilters] = useState({
     salaryMin: '',
     experience: '',
@@ -53,6 +56,9 @@ const JobMatching = () => {
       
       // 初始化向量存储
       await vectorStore.initialize()
+      
+      // 初始化实时搜索引擎
+      await realTimeSearchEngine.initialize()
       
       // 初始化职位匹配编排器
       await jobMatchOrchestrator.initialize()
@@ -87,6 +93,7 @@ const JobMatching = () => {
     setInitializingVector(true)
     try {
       await vectorStore.reloadSampleData()
+      await realTimeSearchEngine.rebuildIndex()
       const newStats = vectorStore.getStats()
       setVectorStats(newStats)
       toast.success(`向量库已刷新，包含 ${newStats.vectorCount} 个职位`)
@@ -97,7 +104,73 @@ const JobMatching = () => {
     }
   }
   
-  const handleSearch = async () => {
+  // 实时搜索处理
+  const handleRealTimeSearch = async (query) => {
+    if (!query.trim()) {
+      setSearchResults([])
+      return
+    }
+    
+    setSearching(true)
+    setSearchTerm(query)
+    
+    try {
+      // 检查向量库状态
+      if (!vectorStats || vectorStats.vectorCount === 0) {
+        toast.warning('向量库为空，正在加载数据...')
+        await vectorStore.reloadSampleData()
+        await realTimeSearchEngine.rebuildIndex()
+        const newStats = vectorStore.getStats()
+        setVectorStats(newStats)
+      }
+      
+      // 使用实时搜索引擎
+      const searchResult = await realTimeSearchEngine.search(query, {
+        filters: {
+          ...filters,
+          location: location || undefined
+        },
+        hitsPerPage: 10,
+        facets: ['location', 'companySize', 'industry']
+      })
+      
+      // 转换结果格式
+      const jobs = searchResult.hits.map(hit => ({
+        ...hit,
+        matchScore: Math.round(hit._score * 100),
+        reasons: ['实时搜索匹配', '关键词相关'],
+        algorithm: {
+          source: 'realtime_search',
+          score: hit._score,
+          matchType: hit._matchType
+        }
+      }))
+      
+      setSearchResults(jobs)
+      
+      // 添加到匹配记录
+      jobs.forEach(job => {
+        addJobMatch({
+          ...job,
+          searchTerm: query,
+          searchLocation: location,
+          algorithm: 'realtime_search',
+          latency: searchResult.processingTime
+        })
+      })
+      
+      toast.success(`找到 ${jobs.length} 个匹配职位 (${Math.round(searchResult.processingTime)}ms)`)
+      
+    } catch (error) {
+      console.error('实时搜索失败:', error)
+      toast.error('搜索失败，请稍后重试')
+    } finally {
+      setSearching(false)
+    }
+  }
+  
+  // 传统搜索处理
+  const handleTraditionalSearch = async () => {
     if (!searchTerm.trim()) {
       toast.error('请输入搜索关键词')
       return
@@ -158,6 +231,22 @@ const JobMatching = () => {
     }
   }
   
+  // 建议选择处理
+  const handleSuggestionSelect = (jobData) => {
+    // 直接显示选中的职位
+    setSearchResults([{
+      ...jobData,
+      matchScore: 95,
+      reasons: ['直接选择', '精确匹配'],
+      algorithm: {
+        source: 'direct_select',
+        score: 0.95
+      }
+    }])
+    
+    toast.success('已选择职位')
+  }
+  
   const getMatchColor = (score) => {
     if (score >= 90) return 'text-green-600 bg-green-100'
     if (score >= 80) return 'text-blue-600 bg-blue-100'
@@ -167,7 +256,9 @@ const JobMatching = () => {
   
   const getAlgorithmBadge = (algorithm) => {
     const badges = {
+      'realtime_search': { text: '实时搜索', color: 'bg-green-100 text-green-700' },
       'advanced_ltr_v2.1': { text: 'LTR算法', color: 'bg-purple-100 text-purple-700' },
+      'direct_select': { text: '直接选择', color: 'bg-blue-100 text-blue-700' },
       'fallback_simple': { text: '基础算法', color: 'bg-gray-100 text-gray-700' }
     }
     
@@ -186,7 +277,7 @@ const JobMatching = () => {
             智能职位匹配系统 v2.1
           </h1>
           <p className="text-gray-600">
-            基于LTR算法和向量检索的高级职位推荐引擎
+            基于实时搜索引擎和LTR算法的高级职位推荐系统
           </p>
           
           {/* 系统状态指示器 */}
@@ -252,134 +343,214 @@ const JobMatching = () => {
         
         {/* 搜索区域 */}
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
-          <div className="flex flex-col space-y-4">
-            {/* 主搜索栏 */}
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="搜索职位、公司或技能关键词"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                    onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  />
-                </div>
+          {/* 搜索模式切换 */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">搜索模式</h3>
+              <div className="flex items-center space-x-2 bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setSearchMode('realtime')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    searchMode === 'realtime'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Zap className="w-4 h-4 mr-2 inline" />
+                  实时搜索
+                </button>
+                <button
+                  onClick={() => setSearchMode('traditional')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    searchMode === 'traditional'
+                      ? 'bg-white text-purple-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Brain className="w-4 h-4 mr-2 inline" />
+                  高级算法
+                </button>
               </div>
-              <div className="md:w-48">
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    type="text"
-                    placeholder="城市"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={handleSearch}
-                disabled={searching || !searchTerm.trim()}
-                className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl font-medium"
-              >
-                {searching ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 inline-block" />
-                    搜索中...
-                  </>
-                ) : (
-                  <>
-                    <Brain className="w-5 h-5 mr-2 inline" />
-                    AI搜索
-                  </>
-                )}
-              </button>
             </div>
             
-            {/* 高级筛选 */}
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-800 transition-colors"
-              >
-                <Filter className="w-4 h-4" />
-                <span>高级筛选</span>
-              </button>
-              
-              {systemStatus && (
-                <div className="flex items-center space-x-4 text-sm text-gray-500">
-                  <span>查询次数: {systemStatus.metrics?.totalQueries || 0}</span>
-                  <span>平均延迟: {Math.round(systemStatus.metrics?.avgLatency || 0)}ms</span>
+            {/* 模式说明 */}
+            <div className="text-sm text-gray-600 bg-gray-50 rounded-lg p-3">
+              {searchMode === 'realtime' ? (
+                <div className="flex items-center space-x-2">
+                  <Zap className="w-4 h-4 text-green-500" />
+                  <span>实时搜索模式：毫秒级响应，智能建议，模糊匹配，适合快速查找</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2">
+                  <Brain className="w-4 h-4 text-purple-500" />
+                  <span>高级算法模式：LTR排序，向量检索，特征工程，适合精准匹配</span>
                 </div>
               )}
             </div>
+          </div>
+          
+          {/* 实时搜索框 */}
+          {searchMode === 'realtime' ? (
+            <div className="space-y-4">
+              <RealTimeSearchBox
+                onSearch={handleRealTimeSearch}
+                onSuggestionSelect={handleSuggestionSelect}
+                placeholder="实时搜索职位、公司、技能关键词..."
+                showFilters={true}
+                autoFocus={true}
+                className="w-full"
+              />
+              
+              {/* 地点筛选 */}
+              <div className="flex items-center space-x-4">
+                <div className="flex-1 max-w-xs">
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      placeholder="城市"
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    />
+                  </div>
+                </div>
+                
+                <div className="text-sm text-gray-500">
+                  实时搜索已启用 · 输入即搜索
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* 传统搜索框 */
+            <div className="flex flex-col space-y-4">
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      placeholder="搜索职位、公司或技能关键词"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                      onKeyPress={(e) => e.key === 'Enter' && handleTraditionalSearch()}
+                    />
+                  </div>
+                </div>
+                <div className="md:w-48">
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      placeholder="城市"
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={handleTraditionalSearch}
+                  disabled={searching || !searchTerm.trim()}
+                  className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl font-medium"
+                >
+                  {searching ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2 inline-block" />
+                      搜索中...
+                    </>
+                  ) : (
+                    <>
+                      <Brain className="w-5 h-5 mr-2 inline" />
+                      AI搜索
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* 高级筛选 */}
+          <div className="flex items-center justify-between mt-4">
+            <button
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              className="flex items-center space-x-2 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              <Filter className="w-4 h-4" />
+              <span>高级筛选</span>
+            </button>
             
-            {/* 高级筛选面板 */}
-            {showAdvancedFilters && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="grid md:grid-cols-4 gap-4 pt-4 border-t border-gray-200"
-              >
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">最低薪资</label>
-                  <input
-                    type="number"
-                    placeholder="如: 15"
-                    value={filters.salaryMin}
-                    onChange={(e) => setFilters(prev => ({ ...prev, salaryMin: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">工作经验</label>
-                  <select
-                    value={filters.experience}
-                    onChange={(e) => setFilters(prev => ({ ...prev, experience: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">不限</option>
-                    <option value="0年">应届生</option>
-                    <option value="1年">1年经验</option>
-                    <option value="3年">3年经验</option>
-                    <option value="5年">5年经验</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">公司规模</label>
-                  <select
-                    value={filters.companySize}
-                    onChange={(e) => setFilters(prev => ({ ...prev, companySize: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">不限</option>
-                    <option value="初创">初创公司</option>
-                    <option value="小型">小型公司</option>
-                    <option value="中型">中型公司</option>
-                    <option value="大型">大型公司</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">行业</label>
-                  <select
-                    value={filters.industry}
-                    onChange={(e) => setFilters(prev => ({ ...prev, industry: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">不限</option>
-                    <option value="互联网">互联网</option>
-                    <option value="金融">金融</option>
-                    <option value="教育">教育</option>
-                    <option value="医疗">医疗</option>
-                  </select>
-                </div>
-              </motion.div>
+            {systemStatus && (
+              <div className="flex items-center space-x-4 text-sm text-gray-500">
+                <span>查询次数: {systemStatus.metrics?.totalQueries || 0}</span>
+                <span>平均延迟: {Math.round(systemStatus.metrics?.avgLatency || 0)}ms</span>
+              </div>
             )}
           </div>
+          
+          {/* 高级筛选面板 */}
+          {showAdvancedFilters && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="grid md:grid-cols-4 gap-4 pt-4 border-t border-gray-200 mt-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">最低薪资</label>
+                <input
+                  type="number"
+                  placeholder="如: 15"
+                  value={filters.salaryMin}
+                  onChange={(e) => setFilters(prev => ({ ...prev, salaryMin: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">工作经验</label>
+                <select
+                  value={filters.experience}
+                  onChange={(e) => setFilters(prev => ({ ...prev, experience: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">不限</option>
+                  <option value="0年">应届生</option>
+                  <option value="1年">1年经验</option>
+                  <option value="3年">3年经验</option>
+                  <option value="5年">5年经验</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">公司规模</label>
+                <select
+                  value={filters.companySize}
+                  onChange={(e) => setFilters(prev => ({ ...prev, companySize: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">不限</option>
+                  <option value="初创">初创公司</option>
+                  <option value="小型">小型公司</option>
+                  <option value="中型">中型公司</option>
+                  <option value="大型">大型公司</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">行业</label>
+                <select
+                  value={filters.industry}
+                  onChange={(e) => setFilters(prev => ({ ...prev, industry: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">不限</option>
+                  <option value="互联网">互联网</option>
+                  <option value="金融">金融</option>
+                  <option value="教育">教育</option>
+                  <option value="医疗">医疗</option>
+                </select>
+              </div>
+            </motion.div>
+          )}
         </div>
         
         {/* 搜索进度 */}
@@ -393,24 +564,33 @@ const JobMatching = () => {
               <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">AI正在智能匹配职位...</h3>
-              <p className="text-gray-600 mb-4">使用LTR算法和向量检索技术为您找到最佳职位</p>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                {searchMode === 'realtime' ? '实时搜索中...' : 'AI正在智能匹配职位...'}
+              </h3>
+              <p className="text-gray-600 mb-4">
+                {searchMode === 'realtime' 
+                  ? '使用实时搜索引擎为您快速匹配职位'
+                  : '使用LTR算法和向量检索技术为您找到最佳职位'
+                }
+              </p>
               
               {/* 算法流程指示器 */}
-              <div className="flex justify-center space-x-4 text-sm">
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
-                  <span>双通道召回</span>
+              {searchMode === 'traditional' && (
+                <div className="flex justify-center space-x-4 text-sm">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
+                    <span>双通道召回</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
+                    <span>特征构建</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
+                    <span>LTR排序</span>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-purple-500 rounded-full animate-pulse" />
-                  <span>特征构建</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
-                  <span>LTR排序</span>
-                </div>
-              </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -425,7 +605,7 @@ const JobMatching = () => {
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2 text-sm text-gray-500">
                   <Zap className="w-4 h-4" />
-                  <span>AI算法增强</span>
+                  <span>{searchMode === 'realtime' ? '实时搜索' : 'AI算法增强'}</span>
                 </div>
                 <select className="px-3 py-1 border border-gray-300 rounded-lg text-sm">
                   <option>按匹配度排序</option>
@@ -487,18 +667,37 @@ const JobMatching = () => {
                         算法评分详情
                       </h4>
                       <div className="grid grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <span className="text-gray-600">关键词匹配:</span>
-                          <span className="ml-2 font-medium">{Math.round((job.algorithm.keywordScore || 0) * 100)}%</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">语义相似度:</span>
-                          <span className="ml-2 font-medium">{Math.round((job.algorithm.vectorScore || 0) * 100)}%</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-600">LTR评分:</span>
-                          <span className="ml-2 font-medium">{Math.round((job.algorithm.ltrScore || 0) * 100)}%</span>
-                        </div>
+                        {searchMode === 'realtime' ? (
+                          <>
+                            <div>
+                              <span className="text-gray-600">匹配类型:</span>
+                              <span className="ml-2 font-medium">{job.algorithm.matchType || 'exact'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">相关性评分:</span>
+                              <span className="ml-2 font-medium">{Math.round((job.algorithm.score || 0) * 100)}%</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">搜索引擎:</span>
+                              <span className="ml-2 font-medium">实时搜索</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <span className="text-gray-600">关键词匹配:</span>
+                              <span className="ml-2 font-medium">{Math.round((job.algorithm.keywordScore || 0) * 100)}%</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">语义相似度:</span>
+                              <span className="ml-2 font-medium">{Math.round((job.algorithm.vectorScore || 0) * 100)}%</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-600">LTR评分:</span>
+                              <span className="ml-2 font-medium">{Math.round((job.algorithm.ltrScore || 0) * 100)}%</span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -608,7 +807,12 @@ const JobMatching = () => {
               <Brain className="w-12 h-12 text-white" />
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">开始智能职位搜索</h3>
-            <p className="text-gray-600 mb-6">使用先进的LTR算法和向量检索技术，为您找到最匹配的职位</p>
+            <p className="text-gray-600 mb-6">
+              {searchMode === 'realtime' 
+                ? '使用实时搜索引擎，输入即搜索，毫秒级响应'
+                : '使用先进的LTR算法和向量检索技术，为您找到最匹配的职位'
+              }
+            </p>
             <div className="grid md:grid-cols-3 gap-4 max-w-2xl mx-auto">
               <div className="text-center p-4">
                 <Target className="w-8 h-8 text-blue-500 mx-auto mb-2" />
@@ -618,7 +822,7 @@ const JobMatching = () => {
               <div className="text-center p-4">
                 <Zap className="w-8 h-8 text-purple-500 mx-auto mb-2" />
                 <h4 className="font-medium text-gray-900">实时排序</h4>
-                <p className="text-sm text-gray-600">LTR算法优化</p>
+                <p className="text-sm text-gray-600">毫秒级响应</p>
               </div>
               <div className="text-center p-4">
                 <TrendingUp className="w-8 h-8 text-green-500 mx-auto mb-2" />
