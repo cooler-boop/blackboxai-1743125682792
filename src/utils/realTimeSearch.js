@@ -359,6 +359,82 @@ export class RealTimeSearchEngine {
   }
 
   /**
+   * 计算部分匹配分数
+   * @param {Object} doc - 文档对象
+   * @param {Array} queryWords - 查询词数组
+   * @returns {number} 部分匹配分数
+   */
+  calculatePartialScore(doc, queryWords) {
+    const searchableText = this.getSearchableText(doc).toLowerCase()
+    let matchedWords = 0
+    let totalScore = 0
+    
+    for (const word of queryWords) {
+      if (word.length < 2) continue // 忽略过短的词
+      
+      // 检查完整单词匹配
+      if (searchableText.includes(word)) {
+        matchedWords++
+        totalScore += 1.0
+      } else {
+        // 检查部分匹配
+        const partialScore = this.calculateWordPartialScore(searchableText, word)
+        if (partialScore > 0.5) {
+          matchedWords += partialScore
+          totalScore += partialScore
+        }
+      }
+    }
+    
+    if (queryWords.length === 0) return 0
+    
+    // 归一化分数：匹配词数 / 总词数
+    const normalizedScore = matchedWords / queryWords.length
+    
+    // 额外加权：如果匹配了多个词，给予奖励
+    const bonusMultiplier = matchedWords > 1 ? 1 + (matchedWords - 1) * 0.1 : 1
+    
+    return Math.min(normalizedScore * bonusMultiplier, 1.0)
+  }
+
+  /**
+   * 计算单词部分匹配分数
+   * @param {string} text - 搜索文本
+   * @param {string} word - 查询词
+   * @returns {number} 部分匹配分数
+   */
+  calculateWordPartialScore(text, word) {
+    const words = text.split(/\s+/)
+    let maxScore = 0
+    
+    for (const textWord of words) {
+      if (textWord.length < 2) continue
+      
+      // 前缀匹配
+      if (textWord.startsWith(word) || word.startsWith(textWord)) {
+        const prefixScore = Math.min(word.length, textWord.length) / Math.max(word.length, textWord.length)
+        maxScore = Math.max(maxScore, prefixScore * 0.8)
+      }
+      
+      // 包含匹配
+      if (textWord.includes(word) || word.includes(textWord)) {
+        const containsScore = Math.min(word.length, textWord.length) / Math.max(word.length, textWord.length)
+        maxScore = Math.max(maxScore, containsScore * 0.6)
+      }
+      
+      // 编辑距离匹配
+      if (word.length > 3 && textWord.length > 3) {
+        const similarity = this.calculateStringSimilarity(word, textWord)
+        if (similarity > 0.7) {
+          maxScore = Math.max(maxScore, similarity * 0.7)
+        }
+      }
+    }
+    
+    return maxScore
+  }
+
+  /**
    * 计算单词模糊分数
    */
   calculateWordFuzzyScore(text, word) {
