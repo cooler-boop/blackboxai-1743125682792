@@ -35,7 +35,7 @@
     "@radix-ui/react-tabs": "^1.0.4",
     "@radix-ui/react-progress": "^1.0.3",
     "@radix-ui/react-toast": "^1.1.5",
-    "linkedin-jobs-api": "^2.1.0"
+    "linkedin-jobs-api": "^2.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
@@ -51,5 +51,11 @@
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
     "vite-bundle-analyzer": "^0.7.0"
+  },
+  "overrides": {
+    "react-speech-kit": {
+      "react": "$react",
+      "react-dom": "$react-dom"
+    }
   }
 }
