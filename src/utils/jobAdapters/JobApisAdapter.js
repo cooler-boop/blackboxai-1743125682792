@@ -5,7 +5,10 @@
 
 export class JobApisAdapter {
   constructor() {
-    this.baseUrl = import.meta.env.VITE_JOBAPIS_URL || 'https://api.jobapis.com'
+    // 使用代理服务器解决CORS问题
+    const proxyUrl = import.meta.env.VITE_PROXY_URL || ''
+    const baseUrl = import.meta.env.VITE_JOBAPIS_URL || 'https://api.jobapis.com'
+    this.baseUrl = proxyUrl ? `${proxyUrl}${baseUrl}` : baseUrl
     this.apiKey = import.meta.env.VITE_JOBAPIS_KEY
     this.supportedProviders = ['monster', 'ziprecruiter', 'craigslist', 'careerbuilder']
     this.rateLimiter = new Map()
